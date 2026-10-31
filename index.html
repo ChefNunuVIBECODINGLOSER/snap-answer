@@ -148,10 +148,11 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
       <label class="check"><input type="checkbox" id="autoframe"> Auto-frame: crop to the page before sending</label>
       <div>
         <div class="hint" style="margin-bottom:6px">Camera frame rate (lower runs cooler)</div>
-        <div class="seg" role="group" aria-label="Frame rate">
-          <button class="btn" type="button" data-fps="10" aria-pressed="true">Cool 10</button>
-          <button class="btn" type="button" data-fps="20" aria-pressed="false">Medium 20</button>
-          <button class="btn" type="button" data-fps="30" aria-pressed="false">Full 30</button>
+        <div class="seg" role="group" aria-label="Frame rate" style="grid-template-columns: repeat(4, minmax(0, 1fr))">
+          <button class="btn" type="button" data-fps="1" aria-pressed="true">1 fps</button>
+          <button class="btn" type="button" data-fps="5" aria-pressed="false">5 fps</button>
+          <button class="btn" type="button" data-fps="15" aria-pressed="false">15 fps</button>
+          <button class="btn" type="button" data-fps="30" aria-pressed="false">30 fps</button>
         </div>
         <p class="hint" id="fpsNow" style="margin-top:6px"></p>
       </div>
@@ -219,7 +220,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     b.addEventListener("click", function () { tier = b.dataset.tier; store.set("sa.tier", tier); paintTier(); b.blur(); });
   });
   paintTier();
-  var fps = parseInt(store.get("sa.fps", "10"), 10) || 10;
+  var fps = parseInt(store.get("sa.fps", "1"), 10);
+  if ([1, 5, 15, 30].indexOf(fps) < 0) fps = 1;
   function paintFps() {
     document.querySelectorAll("[data-fps]").forEach(function (b) { b.setAttribute("aria-pressed", String(parseInt(b.dataset.fps, 10) === fps)); });
   }
@@ -324,15 +326,20 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camMessage("This browser cannot open the camera."); setStatus("error", "No camera API"); return; }
     try {
       if (track) track.stop();
-      var stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: fps } }, audio: false
-      });
+      /* Ask for a capped frame rate; if this camera refuses the cap, ask softly, then without it. */
+      var base = { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, stream = null;
+      var tries = [Object.assign({}, base, { frameRate: { ideal: fps, max: fps } }), Object.assign({}, base, { frameRate: { ideal: fps } })];
+      for (var ti = 0; ti < tries.length && !stream; ti++) {
+        try { stream = await navigator.mediaDevices.getUserMedia({ video: tries[ti], audio: false }); }
+        catch (err) { if (err && err.name !== "OverconstrainedError" && err.name !== "ConstraintNotSatisfiedError") throw err; }
+      }
+      if (!stream) stream = await navigator.mediaDevices.getUserMedia({ video: base, audio: false });
       video.srcObject = stream;
       await video.play();
       track = stream.getVideoTracks()[0];
       try { await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch (e) {}
       var caps = (track.getCapabilities && track.getCapabilities()) || {};
-      try { var fr = track.getSettings().frameRate; $("fpsNow").textContent = fr ? "The camera is running at about " + Math.round(fr) + " frames per second." : ""; } catch (e) {}
+      try { var fr = track.getSettings().frameRate; $("fpsNow").textContent = fr ? "You asked for " + fps + " fps. The camera reports about " + Math.round(fr) + " fps." : ""; } catch (e) {}
       if (video.videoWidth && video.videoHeight) $("cam").style.aspectRatio = video.videoWidth + " / " + video.videoHeight;
       hw = !!(caps.zoom && typeof caps.zoom.max === "number" && caps.zoom.max > (caps.zoom.min || 1));
       zMin = hw ? (caps.zoom.min || 1) : 1;
