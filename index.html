@@ -82,6 +82,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
 .seg { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
 .seg .btn { min-height: 44px; padding: 8px; font-size: .9375rem; }
 .seg .btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+#listen[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .dot, .flash.go { animation: none !important; } }
 </style>
 </head>
@@ -103,6 +104,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     <li><kbd>+</kbd><kbd>&minus;</kbd> speed</li>
     <li id="lightKey" hidden><kbd>L</kbd> light</li>
   </ul>
+  <button class="btn" id="listen" type="button" aria-pressed="false" hidden></button>
+  <p class="hint" id="listenHint" hidden>Keep this page open with the screen on. Chrome may beep each time it restarts listening, and it needs an internet connection.</p>
 
   <div class="statusbar" id="statusbar" data-s="ready" role="status" aria-live="polite">
     <span class="dot"></span><span id="statusText">Starting…</span>
@@ -178,7 +181,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
   function setStatus(s, t) { $("statusbar").dataset.s = s; $("statusText").textContent = t; }
   function idle() {
     if (!track) return;
-    setStatus("ready", apiKey ? "Ready. Press Space." : "Add your API key in Settings.");
+    setStatus("ready", !apiKey ? "Add your API key in Settings." : (wantListen ? "Listening. Say “hey hey” or press Space." : "Ready. Press Space."));
   }
 
   /* ---------- settings ---------- */
@@ -251,6 +254,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     var st = $("statusbar").dataset.s;
     if (synth && synth.speaking && (st === "speaking" || st === "ready")) setStatus("speaking", "Speaking. Esc to stop.");
     else if (synth && !synth.speaking && st === "speaking" && !busy) idle();
+    listenTick();
   }, 300);
 
   function keepAwake() {
@@ -419,6 +423,67 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
   window.addEventListener("keyup", function (e) {
     if ((e.key === " " || e.key === "Enter") && !typingTarget(e.target)) e.preventDefault();
   });
+
+  /* ---------- wake phrase: "hey hey" ---------- */
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var wantListen = store.get("sa.listen", "0") === "1", rec = null, listening = false, lastWake = 0, lastStart = 0;
+  var WAKE = /\b(hey|hay|hei)[\s,.!\-]+(hey|hay|hei)\b/i;
+  function paintListen() {
+    var b = $("listen");
+    b.textContent = wantListen ? "Voice on: say “hey hey” to snap" : "Voice off: tap to use “hey hey”";
+    b.setAttribute("aria-pressed", String(wantListen));
+    $("listenHint").hidden = !wantListen;
+  }
+  function stopListening() {
+    if (rec) { try { rec.abort(); } catch (e) {} }
+    rec = null; listening = false;
+  }
+  function onWake() {
+    if (Date.now() - lastWake < 3000) return;
+    lastWake = Date.now();
+    stopListening();
+    snap();
+  }
+  function startListening() {
+    if (!SR || !wantListen || listening || busy || !track || (synth && synth.speaking)) return;
+    if (Date.now() - lastStart < 1200) return;
+    lastStart = Date.now();
+    try {
+      var r = new SR(), done = {};
+      r.lang = "en-US"; r.continuous = true; r.interimResults = true; r.maxAlternatives = 3;
+      r.onresult = function (ev) {
+        for (var i = ev.resultIndex; i < ev.results.length; i++) {
+          if (done[i]) continue;
+          for (var a = 0; a < ev.results[i].length; a++) {
+            if (WAKE.test(ev.results[i][a].transcript)) { done[i] = true; onWake(); return; }
+          }
+        }
+      };
+      r.onerror = function (ev) {
+        if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
+          wantListen = false; store.set("sa.listen", "0"); paintListen();
+          setStatus("error", "Microphone permission was denied. Allow it in the browser's site settings.");
+        } else if (ev.error === "network") { setStatus("error", "Voice listening needs an internet connection."); }
+      };
+      r.onend = function () { if (rec === r) { rec = null; listening = false; } };
+      rec = r; listening = true; r.start();
+    } catch (e) { rec = null; listening = false; }
+  }
+  /* Called from the 300 ms timer: restart when idle, pause while reading or speaking so the voice is not heard. */
+  function listenTick() {
+    if (!wantListen) return;
+    if (listening && (busy || (synth && synth.speaking))) { stopListening(); return; }
+    if (!listening) startListening();
+  }
+  if (SR) {
+    $("listen").hidden = false; paintListen();
+    $("listen").addEventListener("click", function (e) {
+      e.currentTarget.blur();
+      wantListen = !wantListen; store.set("sa.listen", wantListen ? "1" : "0"); paintListen();
+      if (wantListen) { unlockSpeech(); keepAwake(); lastStart = 0; startListening(); } else { stopListening(); }
+      var st = $("statusbar").dataset.s; if (st === "ready") idle();
+    });
+  }
 
   function paintFocus() { $("focusNote").hidden = document.hasFocus(); }
   window.addEventListener("focus", paintFocus);
