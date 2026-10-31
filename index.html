@@ -305,14 +305,21 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     if (synth && synth.speaking && (st === "speaking" || st === "ready")) setStatus("speaking", "Speaking the answer.");
     else if (synth && !synth.speaking && st === "speaking" && !busy) idle();
     listenTick();
+    keepAwake(); /* re-acquires the screen lock if the phone released it; throttled inside */
   }, 300);
 
+  var wakeBusy = false, lastWakeTry = 0;
   function keepAwake() {
+    if (wake || wakeBusy || document.visibilityState !== "visible") return;
+    if (Date.now() - lastWakeTry < 4000) return;
+    lastWakeTry = Date.now();
     try {
-      if (navigator.wakeLock && !wake) navigator.wakeLock.request("screen").then(function (l) {
-        wake = l; l.addEventListener("release", function () { wake = null; });
-      }).catch(function () {});
-    } catch (e) {}
+      if (!navigator.wakeLock) return;
+      wakeBusy = true;
+      navigator.wakeLock.request("screen").then(function (l) {
+        wake = l; wakeBusy = false; l.addEventListener("release", function () { wake = null; });
+      }).catch(function () { wakeBusy = false; });
+    } catch (e) { wakeBusy = false; }
   }
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "visible") { keepAwake(); if (!sleepMode && (!track || track.readyState === "ended")) startCamera(); }
@@ -670,7 +677,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     snap();
   }
   function startListening() {
-    if (!SR || !wantListen || listening || busy || !track || (synth && synth.speaking)) return;
+    /* Listening must keep running while the camera sleeps: that is how "hey hey" wakes it. */
+    if (!SR || !wantListen || listening || busy || waking || (!track && !sleepMode) || (synth && synth.speaking)) return;
     if (Date.now() < restartAt) return;
     heard = false;
     try {
@@ -719,6 +727,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     wantListen = false;
   }
 
+  keepAwake();
   /* Start with a short preview so you can aim, then sleep if the power saver is on. */
   startCamera().then(function (ok) { if (ok && sleepMode) armSleep(8000); else paintSleep(); });
 })();
