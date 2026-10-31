@@ -146,6 +146,15 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
         </div>
       </div>
       <label class="check"><input type="checkbox" id="autoframe"> Auto-frame: crop to the page before sending</label>
+      <div>
+        <div class="hint" style="margin-bottom:6px">Camera frame rate (lower runs cooler)</div>
+        <div class="seg" role="group" aria-label="Frame rate">
+          <button class="btn" type="button" data-fps="10" aria-pressed="true">Cool 10</button>
+          <button class="btn" type="button" data-fps="20" aria-pressed="false">Medium 20</button>
+          <button class="btn" type="button" data-fps="30" aria-pressed="false">Full 30</button>
+        </div>
+        <p class="hint" id="fpsNow" style="margin-top:6px"></p>
+      </div>
       <label>Voice <select id="voice"><option value="">Phone default</option></select></label>
       <label>Speed <span id="rateVal" class="hint"></span>
         <input type="range" id="rate" min="0.7" max="1.6" step="0.1" value="1">
@@ -210,6 +219,17 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     b.addEventListener("click", function () { tier = b.dataset.tier; store.set("sa.tier", tier); paintTier(); b.blur(); });
   });
   paintTier();
+  var fps = parseInt(store.get("sa.fps", "10"), 10) || 10;
+  function paintFps() {
+    document.querySelectorAll("[data-fps]").forEach(function (b) { b.setAttribute("aria-pressed", String(parseInt(b.dataset.fps, 10) === fps)); });
+  }
+  document.querySelectorAll("[data-fps]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      fps = parseInt(b.dataset.fps, 10); store.set("sa.fps", String(fps)); paintFps(); b.blur();
+      if (track) startCamera(); /* restart with the new rate; zoom goes back to 1x */
+    });
+  });
+  paintFps();
   $("autoframe").checked = autoFrameOn;
   $("autoframe").addEventListener("change", function (e) { autoFrameOn = e.target.checked; store.set("sa.af", autoFrameOn ? "1" : "0"); });
   function paintRate() { $("rate").value = String(rate); $("rateVal").textContent = "(" + rate.toFixed(1) + "x)"; }
@@ -305,13 +325,14 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     try {
       if (track) track.stop();
       var stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: fps } }, audio: false
       });
       video.srcObject = stream;
       await video.play();
       track = stream.getVideoTracks()[0];
       try { await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch (e) {}
       var caps = (track.getCapabilities && track.getCapabilities()) || {};
+      try { var fr = track.getSettings().frameRate; $("fpsNow").textContent = fr ? "The camera is running at about " + Math.round(fr) + " frames per second." : ""; } catch (e) {}
       if (video.videoWidth && video.videoHeight) $("cam").style.aspectRatio = video.videoWidth + " / " + video.videoHeight;
       hw = !!(caps.zoom && typeof caps.zoom.max === "number" && caps.zoom.max > (caps.zoom.min || 1));
       zMin = hw ? (caps.zoom.min || 1) : 1;
