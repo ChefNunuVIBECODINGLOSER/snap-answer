@@ -175,7 +175,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     "A bare term or name is asking for its short definition, in one sentence. A fill-in-the-blank line is asking for the missing word. A calculation or formula is asking for the result. " +
     "If the page has several numbered questions or several cards, answer each in order, briefly, saying its number first. " +
     "Give only the final answer and nothing else. No explanation, no reasoning, no steps, no greeting or sign-off. " +
-    "If a formula or derivation has no question, give its result in one short sentence, or say what is wrong with it. " +
+    "If the page shows a worked calculation or formula with no question, check it: say it is correct, or say in one short sentence what is wrong and give the right value. Do not describe what the page is asking. " +
     "If you cannot read it, or the photo is blurry or shows no page, say that in one short sentence. " +
     "Only explain if the page itself asks for an explanation.\n\n" +
     "Spoken style: plain sentences only. No markdown, bullet points, LaTeX, or symbols such as ^, *, =, or backslashes. " +
@@ -492,7 +492,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
           "anthropic-dangerous-direct-browser-access": "true"
         },
         body: JSON.stringify({
-          model: MODELS[tier] || MODELS["default"], max_tokens: 300, stream: true, system: SYSTEM,
+          model: MODELS[tier] || MODELS["default"], max_tokens: 600, stream: true, system: SYSTEM,
           messages: [{ role: "user", content: [
             { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
             { type: "text", text: "What is this page asking? Give the answer, not the page text." }
