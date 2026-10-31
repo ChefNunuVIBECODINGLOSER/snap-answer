@@ -103,6 +103,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     <button class="chip" id="light" type="button" aria-pressed="false" hidden>Light</button>
     <div class="flash" id="flash"></div>
     <div class="msg" id="camMsg" hidden><div><span id="camMsgText"></span><br><button class="btn primary" id="camStart" type="button">Start camera</button></div></div>
+    <div class="msg" id="sleepMsg" hidden><div>Camera is asleep to stay cool.<br>Say &ldquo;hey hey&rdquo; or tap here: it wakes, snaps, and sleeps again.<br><button class="btn primary" id="peek" type="button">Preview for 20 seconds</button></div></div>
   </div>
 
   <div class="zoomrow">
@@ -145,6 +146,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
           <button class="btn" type="button" data-tier="complex" aria-pressed="false">Careful</button>
         </div>
       </div>
+      <label class="check"><input type="checkbox" id="sleepmode"> Power saver: camera sleeps, wakes only to snap</label>
       <label class="check"><input type="checkbox" id="autoframe"> Auto-frame: crop to the page before sending</label>
       <div>
         <div class="hint" style="margin-bottom:6px">Camera frame rate (lower runs cooler)</div>
@@ -202,9 +204,10 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
   /* ---------- status ---------- */
   function setStatus(s, t) { $("statusbar").dataset.s = s; $("statusText").textContent = t; }
   function idle() {
-    if (!track) return;
+    if (!track && !sleepMode) return;
     var t;
     if (!apiKey) t = "Add your API key in Settings.";
+    else if (!track) t = wantListen ? "Camera asleep. Say “hey hey” to wake and snap." : "Camera asleep. Tap the camera to snap.";
     else if (wantListen) t = "Listening. Say “hey hey”.";
     else t = "Voice is off. Tap the camera to snap.";
     setStatus("ready", t);
@@ -228,12 +231,19 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
   document.querySelectorAll("[data-fps]").forEach(function (b) {
     b.addEventListener("click", function () {
       fps = parseInt(b.dataset.fps, 10); store.set("sa.fps", String(fps)); paintFps(); b.blur();
-      if (track) startCamera(); /* restart with the new rate; zoom goes back to 1x */
+      if (track) startCamera().then(function (ok) { if (ok && sleepMode) armSleep(20000); }); /* restart with the new rate */
     });
   });
   paintFps();
   $("autoframe").checked = autoFrameOn;
   $("autoframe").addEventListener("change", function (e) { autoFrameOn = e.target.checked; store.set("sa.af", autoFrameOn ? "1" : "0"); });
+  var sleepMode = store.get("sa.sleep", "1") === "1", sleepTimer = null, waking = false;
+  $("sleepmode").checked = sleepMode;
+  $("sleepmode").addEventListener("change", function (e) {
+    sleepMode = e.target.checked; store.set("sa.sleep", sleepMode ? "1" : "0");
+    if (sleepMode) { if (track) armSleep(5000); else { paintSleep(); if ($("statusbar").dataset.s === "ready") idle(); } }
+    else { clearTimeout(sleepTimer); paintSleep(); if (!track) startCamera(); }
+  });
   function paintRate() { $("rate").value = String(rate); $("rateVal").textContent = "(" + rate.toFixed(1) + "x)"; }
   function setRate(r) { rate = Math.max(0.7, Math.min(1.6, Math.round(r * 10) / 10)); store.set("sa.rate", String(rate)); paintRate(); }
   $("rate").addEventListener("input", function (e) { setRate(parseFloat(e.target.value)); });
@@ -305,7 +315,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     } catch (e) {}
   }
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "visible") { keepAwake(); if (!track || track.readyState === "ended") startCamera(); }
+    if (document.visibilityState === "visible") { keepAwake(); if (!sleepMode && (!track || track.readyState === "ended")) startCamera(); }
   });
 
   /* ---------- camera and zoom ---------- */
@@ -315,20 +325,24 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     z = clamp(z, zMin, zMax); zoom = z;
     var label = z.toFixed(1) + "×";
     $("zoomVal").textContent = label; $("zoomChip").textContent = label; $("zoom").value = String(z);
-    if (hw && track) track.applyConstraints({ advanced: [{ zoom: z }] }).catch(function () {});
+    if (!track) return; /* camera asleep: the level is remembered and applied at the next wake */
+    if (hw) track.applyConstraints({ advanced: [{ zoom: z }] }).catch(function () {});
     else video.style.transform = z > 1 ? "scale(" + z + ")" : "";
   }
   $("zoom").addEventListener("input", function (e) { applyZoom(parseFloat(e.target.value)); });
 
   function camMessage(text) { $("camMsgText").textContent = text; $("camMsg").hidden = !text; }
-  async function startCamera() {
-    if (!window.isSecureContext) { camMessage("The camera only works on an https:// address. Host this page over HTTPS."); setStatus("error", "Needs https"); return; }
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camMessage("This browser cannot open the camera."); setStatus("error", "No camera API"); return; }
+  /* opts.fps overrides the frame-rate setting (a wake needs a fast burst); opts.quiet leaves the status line alone. Resolves true when the camera is running. */
+  async function startCamera(opts) {
+    opts = opts || {};
+    var useFps = opts.fps || fps;
+    if (!window.isSecureContext) { camMessage("The camera only works on an https:// address. Host this page over HTTPS."); setStatus("error", "Needs https"); return false; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camMessage("This browser cannot open the camera."); setStatus("error", "No camera API"); return false; }
     try {
       if (track) track.stop();
       /* Ask for a capped frame rate; if this camera refuses the cap, ask softly, then without it. */
       var base = { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, stream = null;
-      var tries = [Object.assign({}, base, { frameRate: { ideal: fps, max: fps } }), Object.assign({}, base, { frameRate: { ideal: fps } })];
+      var tries = [Object.assign({}, base, { frameRate: { ideal: useFps, max: useFps } }), Object.assign({}, base, { frameRate: { ideal: useFps } })];
       for (var ti = 0; ti < tries.length && !stream; ti++) {
         try { stream = await navigator.mediaDevices.getUserMedia({ video: tries[ti], audio: false }); }
         catch (err) { if (err && err.name !== "OverconstrainedError" && err.name !== "ConstraintNotSatisfiedError") throw err; }
@@ -339,24 +353,71 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
       track = stream.getVideoTracks()[0];
       try { await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch (e) {}
       var caps = (track.getCapabilities && track.getCapabilities()) || {};
-      try { var fr = track.getSettings().frameRate; $("fpsNow").textContent = fr ? "You asked for " + fps + " fps. The camera reports about " + Math.round(fr) + " fps." : ""; } catch (e) {}
+      try { var fr = track.getSettings().frameRate; $("fpsNow").textContent = fr ? "You asked for " + useFps + " fps. The camera reports about " + Math.round(fr) + " fps." : ""; } catch (e) {}
       if (video.videoWidth && video.videoHeight) $("cam").style.aspectRatio = video.videoWidth + " / " + video.videoHeight;
       hw = !!(caps.zoom && typeof caps.zoom.max === "number" && caps.zoom.max > (caps.zoom.min || 1));
       zMin = hw ? (caps.zoom.min || 1) : 1;
       zMax = hw ? Math.min(caps.zoom.max, 8) : 4;
       var sl = $("zoom"); sl.min = String(zMin); sl.max = String(zMax); sl.step = "0.1";
       video.style.transform = "";
-      applyZoom(zMin);
+      applyZoom(zoom); /* keeps the last zoom level across wakes; clamped to this camera's range */
       $("light").hidden = !("torch" in caps);
       camMessage("");
-      idle();
+      if (!opts.quiet) idle();
+      paintSleep();
+      return true;
     } catch (e) {
       track = null;
       var denied = e && (e.name === "NotAllowedError" || e.name === "SecurityError");
       camMessage(denied ? "Camera permission was denied. Allow it in the browser's site settings, then tap Start." : "The camera could not start. Close other apps using it, then tap Start.");
       setStatus("error", "Camera off");
+      paintSleep();
+      return false;
     }
   }
+
+  /* ---------- power saver: sleep the camera, wake it only to take a photo ---------- */
+  function delay(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function waitFrames(n, maxMs) {
+    return new Promise(function (res) {
+      var c = 0, done = false, t = setTimeout(finish, maxMs);
+      function finish() { if (!done) { done = true; clearTimeout(t); res(); } }
+      if (!video.requestVideoFrameCallback) return;
+      (function tick() { video.requestVideoFrameCallback(function () { if (done) return; c++; if (c >= n) finish(); else tick(); }); })();
+    });
+  }
+  function paintSleep() { $("sleepMsg").hidden = !(sleepMode && !track && !waking && $("camMsg").hidden); }
+  function stopCamera() {
+    clearTimeout(sleepTimer);
+    var s = video.srcObject;
+    if (s && s.getTracks) s.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
+    track = null; video.srcObject = null; torchOn = false;
+    $("light").hidden = true; $("light").setAttribute("aria-pressed", "false");
+    paintSleep();
+  }
+  function armSleep(ms) {
+    clearTimeout(sleepTimer);
+    sleepTimer = setTimeout(function () {
+      if (!sleepMode || waking) return;
+      stopCamera();
+      if ($("statusbar").dataset.s === "ready") idle();
+    }, ms);
+  }
+  async function wakeAndSnap() {
+    if (waking) return;
+    waking = true; clearTimeout(sleepTimer); paintSleep(); stopAll();
+    setStatus("reading", "Waking the camera…");
+    var ok = await startCamera({ fps: 30, quiet: true });
+    if (!ok) { waking = false; paintSleep(); return; }
+    await Promise.all([delay(800), waitFrames(8, 2500)]); /* let focus and exposure settle */
+    waking = false;
+    if (!track || !video.videoWidth) { setStatus("error", "Camera is not ready"); return; }
+    takePhoto();
+  }
+  $("peek").addEventListener("click", function () {
+    unlockSpeech();
+    startCamera({ fps: 10 }).then(function (ok) { if (ok) armSleep(20000); });
+  });
   $("camStart").addEventListener("click", function () { unlockSpeech(); startCamera(); });
   $("light").addEventListener("click", function (e) {
     if (!track) return;
@@ -496,13 +557,24 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     return rest;
   }
 
+  /* Entry point for a voice command or a tap. Asleep: wake, snap, sleep. Awake: snap now. */
   function snap() {
-    if (!track || !video.videoWidth) { setStatus("error", "Camera is not ready"); return; }
+    if (waking) return;
     if (!apiKey) { $("settingsBox").open = true; setStatus("error", "Add your API key in Settings."); return; }
-    unlockSpeech(); keepAwake(); stopAll();
+    unlockSpeech(); keepAwake();
+    if (!track) {
+      if (sleepMode) wakeAndSnap(); else setStatus("error", "Camera is not ready");
+      return;
+    }
+    if (!video.videoWidth) { setStatus("error", "Camera is not ready"); return; }
+    takePhoto();
+  }
+  function takePhoto() {
+    stopAll();
     var f = $("flash"); f.classList.remove("go"); void f.offsetWidth; f.classList.add("go");
     var url = grab();
     $("thumb").src = url; $("thumb").hidden = false;
+    if (sleepMode) stopCamera(); /* the frame is already copied, so the camera can sleep right away */
     ask(url.split(",")[1]);
   }
 
@@ -647,7 +719,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     wantListen = false;
   }
 
-  startCamera();
+  /* Start with a short preview so you can aim, then sleep if the power saver is on. */
+  startCamera().then(function (ok) { if (ok && sleepMode) armSleep(8000); else paintSleep(); });
 })();
 </script>
 </body>
