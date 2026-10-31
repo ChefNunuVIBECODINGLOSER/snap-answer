@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0f1615">
 <title>Snap Answer</title>
 <style>
-/* Layout: live camera on top with crop-mark guides, one status line, the answer, settings last. */
+/* Layout: live camera on top with crop-mark guides and a zoom readout, a zoom slider, one status line, the answer, settings last. */
 :root {
   --bg: #eef1ec; --grid: #d9e0d8; --surface: #fbfcfa; --ink: #15201e; --ink-soft: #4b5b57; --line: #bcc7c0;
   --accent: #0a6c88; --accent-ink: #fff; --signal: #b86a00; --ok: #1f7a46; --bad: #b3261e;
@@ -32,24 +32,28 @@ main { max-width: 34rem; margin: 0 auto; display: flex; flex-direction: column; 
 h1 { font-size: 1.5rem; line-height: 1.15; margin: 0; letter-spacing: -0.01em; }
 h2 { font: 700 0.75rem/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-soft); margin: 0; }
 .hint { margin: 0; font-size: 0.9375rem; color: var(--ink-soft); }
-.hint.warn { color: var(--signal); font-weight: 700; }
 
-.cam { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #000; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); touch-action: manipulation; }
-.cam video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam { position: relative; width: 100%; aspect-ratio: 4 / 3; max-height: 58vh; background: #000; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); touch-action: none; user-select: none; -webkit-user-select: none; }
+.cam video { width: 100%; height: 100%; object-fit: contain; display: block; transform-origin: 50% 50%; }
 .cam .mark { position: absolute; width: 28px; height: 28px; border: 0 solid rgba(255,255,255,.85); pointer-events: none; }
 .mark.tl { top: 10px; left: 10px; border-top-width: 3px; border-left-width: 3px; }
 .mark.tr { top: 10px; right: 10px; border-top-width: 3px; border-right-width: 3px; }
 .mark.bl { bottom: 10px; left: 10px; border-bottom-width: 3px; border-left-width: 3px; }
 .mark.br { bottom: 10px; right: 10px; border-bottom-width: 3px; border-right-width: 3px; }
+.chip { position: absolute; font: 700 .8125rem/1 var(--font-mono); color: #fff; background: rgba(0,0,0,.6); padding: 7px 9px; border-radius: 5px; border: 0; }
+#zoomChip { left: 12px; bottom: 14px; pointer-events: none; }
+#light { right: 12px; top: 12px; min-height: 36px; cursor: pointer; }
+#light[aria-pressed="true"] { background: var(--signal); color: #111; }
 .flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
 .flash.go { animation: flash .35s ease-out; }
 @keyframes flash { 0% { opacity: .9; } 100% { opacity: 0; } }
-.cam .msg { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 20px; color: #fff; font-size: .9375rem; background: rgba(0,0,0,.55); }
+.cam .msg { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 20px; color: #fff; font-size: .9375rem; background: rgba(0,0,0,.6); }
 .cam .msg button { margin-top: 10px; }
 
-.keys { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0; padding: 0; list-style: none; font-size: .875rem; color: var(--ink-soft); }
-.keys li { display: flex; align-items: center; gap: 6px; }
-kbd { font: 700 .75rem/1 var(--font-mono); padding: 6px 7px 7px; border: 1px solid var(--ink-soft); border-bottom-width: 3px; border-radius: 5px; background: var(--surface); color: var(--ink); }
+.zoomrow { display: flex; align-items: center; gap: 12px; }
+.zoomrow label { flex: none; font: 700 .75rem/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-soft); }
+.zoomrow input[type="range"] { flex: 1; min-width: 0; }
+.zoomrow output { flex: none; min-width: 3.2rem; text-align: right; font: 700 .9375rem/1 var(--font-mono); }
 
 .statusbar { display: flex; align-items: center; gap: 12px; min-height: 28px; }
 .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--ink-soft); flex: none; }
@@ -66,6 +70,7 @@ kbd { font: 700 .75rem/1 var(--font-mono); padding: 6px 7px 7px; border: 1px sol
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .row { display: flex; gap: 10px; flex-wrap: wrap; }
 .row .btn { flex: 1 1 7rem; }
+#listen[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 14px 14px 16px; display: flex; flex-direction: column; gap: 10px; }
 .answerwrap { display: flex; gap: 12px; align-items: flex-start; }
@@ -77,12 +82,13 @@ details { background: var(--surface); border: 1px solid var(--line); border-radi
 summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 700; }
 .settings { display: flex; flex-direction: column; gap: 14px; padding: 6px 0 14px; }
 label { display: flex; flex-direction: column; gap: 6px; font-size: .9375rem; min-width: 0; }
+label.check { flex-direction: row; align-items: center; gap: 10px; min-height: 44px; }
+label.check input { width: 22px; height: 22px; accent-color: var(--accent); flex: none; }
 input[type="password"], select { font: 400 1rem var(--font-body); padding: 10px; min-height: 44px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; max-width: 100%; width: 100%; }
 input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px; }
 .seg { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
 .seg .btn { min-height: 44px; padding: 8px; font-size: .9375rem; }
 .seg .btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-#listen[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .dot, .flash.go { animation: none !important; } }
 </style>
 </head>
@@ -90,33 +96,33 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
 <main>
   <h1>Snap Answer</h1>
 
-  <div class="cam" id="cam" aria-label="Live camera. Tap to snap.">
+  <div class="cam" id="cam" aria-label="Live camera. Pinch to zoom. Tap to snap.">
     <video id="video" playsinline muted autoplay></video>
     <i class="mark tl"></i><i class="mark tr"></i><i class="mark bl"></i><i class="mark br"></i>
+    <span class="chip" id="zoomChip">1.0&times;</span>
+    <button class="chip" id="light" type="button" aria-pressed="false" hidden>Light</button>
     <div class="flash" id="flash"></div>
     <div class="msg" id="camMsg" hidden><div><span id="camMsgText"></span><br><button class="btn primary" id="camStart" type="button">Start camera</button></div></div>
   </div>
 
-  <ul class="keys" aria-label="Keyboard shortcuts">
-    <li><kbd>Space</kbd> snap</li>
-    <li><kbd>R</kbd> repeat</li>
-    <li><kbd>Esc</kbd> stop</li>
-    <li><kbd>+</kbd><kbd>&minus;</kbd> speed</li>
-    <li id="lightKey" hidden><kbd>L</kbd> light</li>
-  </ul>
-  <button class="btn" id="listen" type="button" aria-pressed="false" hidden></button>
-  <p class="hint" id="listenHint" hidden>Keep this page open with the screen on. Chrome may beep each time it restarts listening, and it needs an internet connection.</p>
+  <div class="zoomrow">
+    <label for="zoom">Zoom</label>
+    <input type="range" id="zoom" min="1" max="4" step="0.1" value="1" aria-label="Camera zoom">
+    <output id="zoomVal" for="zoom">1.0&times;</output>
+  </div>
 
   <div class="statusbar" id="statusbar" data-s="ready" role="status" aria-live="polite">
     <span class="dot"></span><span id="statusText">Starting…</span>
   </div>
-  <p class="hint warn" id="focusNote" hidden>Tap the page once so the keyboard works.</p>
+
+  <button class="btn" id="listen" type="button" aria-pressed="false" hidden></button>
+  <p class="hint" id="listenHint" hidden>Say &ldquo;hey hey&rdquo; to snap, &ldquo;zoom in&rdquo; or &ldquo;zoom out&rdquo; to zoom. Keep this page open with the screen on. Chrome may beep each time it restarts listening, and it needs an internet connection. You can also pinch the camera to zoom or tap it to snap.</p>
 
   <section class="card" aria-label="Answer">
     <h2>Answer</h2>
     <div class="answerwrap">
       <img id="thumb" alt="Last snapped photo" hidden>
-      <div id="answer" class="empty" aria-live="polite">Point the camera at a page and press Space.</div>
+      <div id="answer" class="empty" aria-live="polite">Point the camera at a page and say &ldquo;hey hey&rdquo;.</div>
     </div>
     <div class="row">
       <button class="btn" id="again" type="button" disabled>Say it again</button>
@@ -139,6 +145,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
           <button class="btn" type="button" data-tier="complex" aria-pressed="false">Careful</button>
         </div>
       </div>
+      <label class="check"><input type="checkbox" id="autoframe"> Auto-frame: crop to the page before sending</label>
       <label>Voice <select id="voice"><option value="">Phone default</option></select></label>
       <label>Speed <span id="rateVal" class="hint"></span>
         <input type="range" id="rate" min="0.7" max="1.6" step="0.1" value="1">
@@ -175,13 +182,18 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
   var synth = window.speechSynthesis || null;
   var apiKey = store.get("sa.key", ""), tier = store.get("sa.tier", "default");
   var rate = parseFloat(store.get("sa.rate", "1")) || 1, voiceName = store.get("sa.voice", "");
+  var autoFrameOn = store.get("sa.af", "1") === "1";
   var busy = false, ctl = null, spoken = 0, lastAnswer = "", wake = null, unlocked = false;
 
   /* ---------- status ---------- */
   function setStatus(s, t) { $("statusbar").dataset.s = s; $("statusText").textContent = t; }
   function idle() {
     if (!track) return;
-    setStatus("ready", !apiKey ? "Add your API key in Settings." : (wantListen ? "Listening. Say “hey hey” or press Space." : "Ready. Press Space."));
+    var t;
+    if (!apiKey) t = "Add your API key in Settings.";
+    else if (wantListen) t = "Listening. Say “hey hey”.";
+    else t = "Voice is off. Tap the camera to snap.";
+    setStatus("ready", t);
   }
 
   /* ---------- settings ---------- */
@@ -194,6 +206,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     b.addEventListener("click", function () { tier = b.dataset.tier; store.set("sa.tier", tier); paintTier(); b.blur(); });
   });
   paintTier();
+  $("autoframe").checked = autoFrameOn;
+  $("autoframe").addEventListener("change", function (e) { autoFrameOn = e.target.checked; store.set("sa.af", autoFrameOn ? "1" : "0"); });
   function paintRate() { $("rate").value = String(rate); $("rateVal").textContent = "(" + rate.toFixed(1) + "x)"; }
   function setRate(r) { rate = Math.max(0.7, Math.min(1.6, Math.round(r * 10) / 10)); store.set("sa.rate", String(rate)); paintRate(); }
   $("rate").addEventListener("input", function (e) { setRate(parseFloat(e.target.value)); });
@@ -212,7 +226,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
   if (synth) { loadVoices(); synth.onvoiceschanged = loadVoices; }
   if (!apiKey) $("settingsBox").open = true;
 
-  /* ---------- speech ---------- */
+  /* ---------- speech out ---------- */
   function unlockSpeech() {
     if (unlocked || !synth) return; unlocked = true;
     try { var u = new SpeechSynthesisUtterance(" "); u.volume = 0; synth.speak(u); } catch (e) {}
@@ -252,7 +266,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
   function stopAll() { if (ctl) { try { ctl.abort(); } catch (e) {} } stopTalking(); }
   setInterval(function () {
     var st = $("statusbar").dataset.s;
-    if (synth && synth.speaking && (st === "speaking" || st === "ready")) setStatus("speaking", "Speaking. Esc to stop.");
+    if (synth && synth.speaking && (st === "speaking" || st === "ready")) setStatus("speaking", "Speaking the answer.");
     else if (synth && !synth.speaking && st === "speaking" && !busy) idle();
     listenTick();
   }, 300);
@@ -268,7 +282,18 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     if (document.visibilityState === "visible") { keepAwake(); if (!track || track.readyState === "ended") startCamera(); }
   });
 
-  /* ---------- camera ---------- */
+  /* ---------- camera and zoom ---------- */
+  var hw = false, zoom = 1, zMin = 1, zMax = 4;
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function applyZoom(z) {
+    z = clamp(z, zMin, zMax); zoom = z;
+    var label = z.toFixed(1) + "×";
+    $("zoomVal").textContent = label; $("zoomChip").textContent = label; $("zoom").value = String(z);
+    if (hw && track) track.applyConstraints({ advanced: [{ zoom: z }] }).catch(function () {});
+    else video.style.transform = z > 1 ? "scale(" + z + ")" : "";
+  }
+  $("zoom").addEventListener("input", function (e) { applyZoom(parseFloat(e.target.value)); });
+
   function camMessage(text) { $("camMsgText").textContent = text; $("camMsg").hidden = !text; }
   async function startCamera() {
     if (!window.isSecureContext) { camMessage("The camera only works on an https:// address. Host this page over HTTPS."); setStatus("error", "Needs https"); return; }
@@ -283,7 +308,14 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
       track = stream.getVideoTracks()[0];
       try { await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch (e) {}
       var caps = (track.getCapabilities && track.getCapabilities()) || {};
-      $("lightKey").hidden = !("torch" in caps);
+      if (video.videoWidth && video.videoHeight) $("cam").style.aspectRatio = video.videoWidth + " / " + video.videoHeight;
+      hw = !!(caps.zoom && typeof caps.zoom.max === "number" && caps.zoom.max > (caps.zoom.min || 1));
+      zMin = hw ? (caps.zoom.min || 1) : 1;
+      zMax = hw ? Math.min(caps.zoom.max, 8) : 4;
+      var sl = $("zoom"); sl.min = String(zMin); sl.max = String(zMax); sl.step = "0.1";
+      video.style.transform = "";
+      applyZoom(zMin);
+      $("light").hidden = !("torch" in caps);
       camMessage("");
       idle();
     } catch (e) {
@@ -294,13 +326,131 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     }
   }
   $("camStart").addEventListener("click", function () { unlockSpeech(); startCamera(); });
-  function toggleLight() {
+  $("light").addEventListener("click", function (e) {
     if (!track) return;
     torchOn = !torchOn;
-    track.applyConstraints({ advanced: [{ torch: torchOn }] }).catch(function () { torchOn = !torchOn; });
+    var b = e.currentTarget;
+    track.applyConstraints({ advanced: [{ torch: torchOn }] }).then(function () { b.setAttribute("aria-pressed", String(torchOn)); }).catch(function () { torchOn = !torchOn; });
+  });
+
+  /* Pinch to zoom, single tap to snap. */
+  var ptrs = {}, pinch = null, gesture = false;
+  function ptrCount() { return Object.keys(ptrs).length; }
+  function ptrDist() {
+    var k = Object.keys(ptrs); if (k.length < 2) return 0;
+    var a = ptrs[k[0]], b = ptrs[k[1]]; return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+  var camEl = $("cam");
+  camEl.addEventListener("pointerdown", function (e) {
+    if (e.target.closest("button")) return;
+    unlockSpeech();
+    try { camEl.setPointerCapture(e.pointerId); } catch (x) {}
+    ptrs[e.pointerId] = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY };
+    if (ptrCount() === 2) { pinch = { d: ptrDist(), z: zoom }; gesture = true; }
+  });
+  camEl.addEventListener("pointermove", function (e) {
+    var p = ptrs[e.pointerId]; if (!p) return;
+    p.x = e.clientX; p.y = e.clientY;
+    if (pinch && ptrCount() >= 2 && pinch.d > 0) applyZoom(pinch.z * ptrDist() / pinch.d);
+    else if (Math.hypot(p.x - p.sx, p.y - p.sy) > 12) gesture = true;
+  });
+  function ptrEnd(e) {
+    if (!ptrs[e.pointerId]) return;
+    delete ptrs[e.pointerId];
+    if (ptrCount() < 2) pinch = null;
+    if (ptrCount() === 0) {
+      var wasGesture = gesture; gesture = false;
+      if (e.type === "pointerup" && !wasGesture) snap();
+    }
+  }
+  camEl.addEventListener("pointerup", ptrEnd);
+  camEl.addEventListener("pointercancel", ptrEnd);
+
+  /* ---------- auto-frame: find where the writing is and crop to it ---------- */
+  /* gray: Uint8 luminance, w x h. Returns {x,y,w,h} as fractions of the frame, or null to keep the whole frame. */
+  function frameBox(g, w, h) {
+    var cs = 10, cw = Math.floor(w / cs), ch = Math.floor(h / cs);
+    if (cw < 6 || ch < 6) return null;
+    var m = new Float32Array(cw * ch), cx, cy, x, y;
+    for (cy = 0; cy < ch; cy++) for (cx = 0; cx < cw; cx++) {
+      var sum = 0, n = 0;
+      for (y = cy * cs; y < (cy + 1) * cs; y++) for (x = cx * cs; x < (cx + 1) * cs; x++) {
+        var i = y * w + x, v = g[i];
+        if (x + 1 < w) sum += Math.abs(g[i + 1] - v);
+        if (y + 1 < h) sum += Math.abs(g[i + w] - v);
+        n++;
+      }
+      m[cy * cw + cx] = sum / n;
+    }
+    var sorted = Array.prototype.slice.call(m).sort(function (a, b) { return a - b; });
+    var med = sorted[sorted.length >> 1], thr = Math.max(12, med * 3);
+    var act = new Uint8Array(cw * ch), total = 0;
+    for (var k = 0; k < m.length; k++) if (m[k] > thr) { act[k] = 1; total++; }
+    /* drop isolated specks: a cell needs an active neighbour */
+    var keep = new Uint8Array(cw * ch), minx = cw, maxx = -1, miny = ch, maxy = -1, kept = 0;
+    for (cy = 0; cy < ch; cy++) for (cx = 0; cx < cw; cx++) {
+      if (!act[cy * cw + cx]) continue;
+      var nb = 0;
+      for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        var ax = cx + dx, ay = cy + dy;
+        if (ax >= 0 && ay >= 0 && ax < cw && ay < ch && act[ay * cw + ax]) nb++;
+      }
+      if (nb >= 1) {
+        keep[cy * cw + cx] = 1; kept++;
+        if (cx < minx) minx = cx; if (cx > maxx) maxx = cx;
+        if (cy < miny) miny = cy; if (cy > maxy) maxy = cy;
+      }
+    }
+    if (kept < 12) return null; /* a speck or a bolt is not writing; keep the whole frame */
+    var bw = (maxx - minx + 1) / cw, bh = (maxy - miny + 1) / ch;
+    var x0 = minx / cw, y0 = miny / ch;
+    /* margin, then a minimum size so the crop never becomes a sliver */
+    var mx = Math.max(bw * 0.08, 1 / cw), my = Math.max(bh * 0.08, 1 / ch);
+    x0 -= mx; y0 -= my; bw += 2 * mx; bh += 2 * my;
+    if (bw < 0.4) { x0 -= (0.4 - bw) / 2; bw = 0.4; }
+    if (bh < 0.4) { y0 -= (0.4 - bh) / 2; bh = 0.4; }
+    x0 = clamp(x0, 0, 1 - Math.min(bw, 1)); y0 = clamp(y0, 0, 1 - Math.min(bh, 1));
+    bw = Math.min(bw, 1 - x0); bh = Math.min(bh, 1 - y0);
+    if (bw * bh > 0.8) return null; /* writing fills the frame already, or the scene is too busy to tell */
+    return { x: x0, y: y0, w: bw, h: bh };
+  }
+  function detectBox(src) {
+    var W = 320, H = Math.max(8, Math.round(src.height * W / src.width));
+    var t = document.createElement("canvas"); t.width = W; t.height = H;
+    var tc = t.getContext("2d", { willReadFrequently: true });
+    tc.drawImage(src, 0, 0, W, H);
+    var d = tc.getImageData(0, 0, W, H).data, g = new Uint8Array(W * H);
+    for (var i = 0, j = 0; i < d.length; i += 4, j++) g[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+    return frameBox(g, W, H);
   }
 
-  /* ---------- parse the streamed reply (Server-Sent Events) ---------- */
+  /* ---------- the snap ---------- */
+  function grab() {
+    var vw = video.videoWidth, vh = video.videoHeight, sx = 0, sy = 0, sw = vw, sh = vh;
+    if (!hw && zoom > 1) { sw = vw / zoom; sh = vh / zoom; sx = (vw - sw) / 2; sy = (vh - sh) / 2; }
+    var s = Math.min(1, 1920 / Math.max(sw, sh)), cw = Math.round(sw * s), ch = Math.round(sh * s);
+    canvas.width = cw; canvas.height = ch;
+    canvas.getContext("2d").drawImage(video, sx, sy, sw, sh, 0, 0, cw, ch);
+    var bx = 0, by = 0, bw = cw, bh = ch;
+    if (autoFrameOn) {
+      var box = null; try { box = detectBox(canvas); } catch (e) {}
+      if (box) { bx = Math.round(box.x * cw); by = Math.round(box.y * ch); bw = Math.round(box.w * cw); bh = Math.round(box.h * ch); }
+    }
+    var k = Math.min(1, 1568 / Math.max(bw, bh)), o = document.createElement("canvas");
+    o.width = Math.max(1, Math.round(bw * k)); o.height = Math.max(1, Math.round(bh * k));
+    o.getContext("2d").drawImage(canvas, bx, by, bw, bh, 0, 0, o.width, o.height);
+    return o.toDataURL("image/jpeg", 0.9);
+  }
+
+  var HTTP_ERR = {
+    401: "The API key was rejected. Check it in Settings.",
+    403: "This API key is not allowed to do that.",
+    404: "That model name was not found for this key.",
+    413: "The photo was too large.",
+    429: "Rate limit or usage limit reached. Wait a moment.",
+    529: "Claude is overloaded. Try again."
+  };
   function consume(buf, onEvent) {
     var lines = buf.split("\n"), rest = lines.pop();
     lines.forEach(function (line) {
@@ -314,25 +464,12 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     return rest;
   }
 
-  var HTTP_ERR = {
-    401: "The API key was rejected. Check it in Settings.",
-    403: "This API key is not allowed to do that.",
-    404: "That model name was not found for this key.",
-    413: "The photo was too large.",
-    429: "Rate limit or usage limit reached. Wait a moment.",
-    529: "Claude is overloaded. Press Space to try again."
-  };
-
-  /* ---------- the snap ---------- */
   function snap() {
     if (!track || !video.videoWidth) { setStatus("error", "Camera is not ready"); return; }
     if (!apiKey) { $("settingsBox").open = true; setStatus("error", "Add your API key in Settings."); return; }
     unlockSpeech(); keepAwake(); stopAll();
     var f = $("flash"); f.classList.remove("go"); void f.offsetWidth; f.classList.add("go");
-    var w = video.videoWidth, h = video.videoHeight, s = Math.min(1, 1568 / Math.max(w, h));
-    canvas.width = Math.round(w * s); canvas.height = Math.round(h * s);
-    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
-    var url = canvas.toDataURL("image/jpeg", 0.88);
+    var url = grab();
     $("thumb").src = url; $("thumb").hidden = false;
     ask(url.split(",")[1]);
   }
@@ -370,7 +507,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
         buf = consume(buf + dec.decode(r.value, { stream: true }), function (ev) {
           if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "text_delta") {
             text += ev.delta.text; lastAnswer = text; out.textContent = text;
-            if (!spoken) setStatus("speaking", "Speaking. Esc to stop.");
+            if (!spoken) setStatus("speaking", "Speaking the answer.");
             feed(text, false);
           } else if (ev.type === "message_delta" && ev.delta && ev.delta.stop_reason) { stop = ev.delta.stop_reason; }
           else if (ev.type === "error") { var e2 = new Error((ev.error && ev.error.message) || "Claude reported an error."); e2.api = true; throw e2; }
@@ -390,7 +527,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
       }
     } finally {
       busy = false;
-      if (synth && synth.speaking) setStatus("speaking", "Speaking. Esc to stop.");
+      if (synth && synth.speaking) setStatus("speaking", "Speaking the answer.");
       else if ($("statusbar").dataset.s !== "error") idle();
     }
   }
@@ -398,39 +535,23 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
   function repeat() {
     if (!lastAnswer) return;
     stopTalking(); spoken = 0; unlockSpeech(); feed(lastAnswer, true);
-    setStatus("speaking", "Speaking. Esc to stop.");
+    setStatus("speaking", "Speaking the answer.");
   }
 
-  /* ---------- buttons, taps, keys ---------- */
-  $("cam").addEventListener("click", function (e) { if (e.target.closest("button")) return; snap(); });
   $("again").addEventListener("click", function (e) { e.currentTarget.blur(); repeat(); });
   $("stop").addEventListener("click", function (e) { e.currentTarget.blur(); stopAll(); idle(); });
   $("test").addEventListener("click", function (e) { e.currentTarget.blur(); unlockSpeech(); stopTalking(); say("Voice check. Torque equals force times distance."); });
+  document.addEventListener("pointerdown", unlockSpeech);
 
-  function typingTarget(t) { return t && (t.tagName === "SELECT" || t.tagName === "TEXTAREA" || t.tagName === "INPUT"); }
-  window.addEventListener("keydown", function (e) {
-    if (e.ctrlKey || e.metaKey || e.altKey || typingTarget(e.target)) return;
-    var k = e.key, handled = true;
-    if (k === " " || k === "Spacebar" || k === "Enter") { if (!e.repeat) snap(); }
-    else if (k === "r" || k === "R") { if (!e.repeat) repeat(); }
-    else if (k === "Escape" || k === "s" || k === "S") { if (!e.repeat) { stopAll(); idle(); } }
-    else if (k === "l" || k === "L") { if (!e.repeat) toggleLight(); }
-    else if (k === "+" || k === "=") setRate(rate + 0.1);
-    else if (k === "-" || k === "_") setRate(rate - 0.1);
-    else handled = false;
-    if (handled) e.preventDefault();
-  });
-  window.addEventListener("keyup", function (e) {
-    if ((e.key === " " || e.key === "Enter") && !typingTarget(e.target)) e.preventDefault();
-  });
-
-  /* ---------- wake phrase: "hey hey" ---------- */
+  /* ---------- voice commands: "hey hey" snaps, "zoom in" / "zoom out" ---------- */
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  var wantListen = store.get("sa.listen", "0") === "1", rec = null, listening = false, lastWake = 0, lastStart = 0;
+  var wantListen = store.get("sa.listen", "1") === "1", rec = null, listening = false, lastWake = 0, lastStart = 0;
   var WAKE = /\b(hey|hay|hei)[\s,.!\-]+(hey|hay|hei)\b/i;
+  var ZIN = /\bzoom in\b/gi, ZOUT = /\bzoom out\b/gi;
+  function count(str, re) { var m = str.match(re); return m ? m.length : 0; }
   function paintListen() {
     var b = $("listen");
-    b.textContent = wantListen ? "Voice on: say “hey hey” to snap" : "Voice off: tap to use “hey hey”";
+    b.textContent = wantListen ? "Voice on" : "Voice off: tap to turn on";
     b.setAttribute("aria-pressed", String(wantListen));
     $("listenHint").hidden = !wantListen;
   }
@@ -449,14 +570,19 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     if (Date.now() - lastStart < 1200) return;
     lastStart = Date.now();
     try {
-      var r = new SR(), done = {};
+      var r = new SR(), seen = {};
       r.lang = "en-US"; r.continuous = true; r.interimResults = true; r.maxAlternatives = 3;
       r.onresult = function (ev) {
         for (var i = ev.resultIndex; i < ev.results.length; i++) {
-          if (done[i]) continue;
-          for (var a = 0; a < ev.results[i].length; a++) {
-            if (WAKE.test(ev.results[i][a].transcript)) { done[i] = true; onWake(); return; }
+          var st = seen[i] || (seen[i] = { woke: false, zi: 0, zo: 0 }), res = ev.results[i];
+          if (!st.woke) {
+            for (var a = 0; a < res.length; a++) {
+              if (WAKE.test(res[a].transcript)) { st.woke = true; onWake(); return; }
+            }
           }
+          var t0 = res[0].transcript, zi = count(t0, ZIN), zo = count(t0, ZOUT);
+          while (st.zi < zi) { st.zi++; applyZoom(zoom * 1.4); }
+          while (st.zo < zo) { st.zo++; applyZoom(zoom / 1.4); }
         }
       };
       r.onerror = function (ev) {
@@ -469,7 +595,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
       rec = r; listening = true; r.start();
     } catch (e) { rec = null; listening = false; }
   }
-  /* Called from the 300 ms timer: restart when idle, pause while reading or speaking so the voice is not heard. */
+  /* Runs from the 300 ms timer: restart when idle, pause while reading or speaking so the voice is not heard. */
   function listenTick() {
     if (!wantListen) return;
     if (listening && (busy || (synth && synth.speaking))) { stopListening(); return; }
@@ -481,15 +607,11 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
       e.currentTarget.blur();
       wantListen = !wantListen; store.set("sa.listen", wantListen ? "1" : "0"); paintListen();
       if (wantListen) { unlockSpeech(); keepAwake(); lastStart = 0; startListening(); } else { stopListening(); }
-      var st = $("statusbar").dataset.s; if (st === "ready") idle();
+      if ($("statusbar").dataset.s === "ready") idle();
     });
+  } else {
+    wantListen = false;
   }
-
-  function paintFocus() { $("focusNote").hidden = document.hasFocus(); }
-  window.addEventListener("focus", paintFocus);
-  window.addEventListener("blur", function () { setTimeout(paintFocus, 50); });
-  document.addEventListener("pointerdown", function () { unlockSpeech(); setTimeout(paintFocus, 50); });
-  paintFocus();
 
   startCamera();
 })();
