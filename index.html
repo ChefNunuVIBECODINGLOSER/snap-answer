@@ -160,13 +160,13 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
   var SYSTEM =
     "You are a hands-free assistant on a robotics workbench. The user photographs a page of handwritten or printed notes, sketches, formulas or a question. " +
     "Your reply is read aloud by a text-to-speech voice, so write it for the ear.\n\n" +
-    "If the page contains a question or a calculation, answer it: start with the answer itself in one sentence, then give at most three short sentences of reasoning. " +
-    "If it shows a formula or derivation with no question, say what it computes and point out any mistake you see. " +
-    "If part of it is unreadable, say which part and give your best reading. " +
-    "If the photo is blurry or shows no page, say so in one sentence.\n\n" +
+    "Give only the final answer and nothing else. No explanation, no reasoning, no steps, no restating the question, no greeting or sign-off. Usually that is a number with its unit, a word, or one short sentence. " +
+    "Only if the page has a formula or derivation with no question, give its result in one short sentence, or say what is wrong with it. " +
+    "If you cannot read it, or the photo is blurry or shows no page, say that in one short sentence. " +
+    "Only explain if the page itself asks for an explanation.\n\n" +
     "Spoken style: plain sentences only. No markdown, bullet points, LaTeX, or symbols such as ^, *, =, or backslashes. " +
     "Say math in words, for example: theta one, x squared, the square root of two, pi over four, newton meters, degrees. " +
-    "Keep the whole reply under about 80 words unless the page needs more.";
+    "Never go over two short sentences unless the page asks for an explanation.";
 
   var video = $("video"), canvas = $("canvas"), track = null, torchOn = false;
   var synth = window.speechSynthesis || null;
@@ -347,7 +347,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
           "anthropic-dangerous-direct-browser-access": "true"
         },
         body: JSON.stringify({
-          model: MODELS[tier] || MODELS["default"], max_tokens: 500, stream: true, system: SYSTEM,
+          model: MODELS[tier] || MODELS["default"], max_tokens: 300, stream: true, system: SYSTEM,
           messages: [{ role: "user", content: [
             { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
             { type: "text", text: "Answer what is on this page." }
