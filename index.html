@@ -549,7 +549,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
 
   /* ---------- voice commands: "hey hey" snaps, "zoom in" / "zoom out" ---------- */
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  var wantListen = store.get("sa.listen", "1") === "1", rec = null, listening = false, lastWake = 0, lastStart = 0;
+  var wantListen = store.get("sa.listen", "1") === "1", rec = null, listening = false, lastWake = 0, restartAt = 0, heard = false;
   var WAKE = /\b(hey|hay|hei)[\s,.!\-]+(hey|hay|hei)\b/i;
   var ZIN = /\bzoom in\b/gi, ZOUT = /\bzoom out\b/gi;
   function count(str, re) { var m = str.match(re); return m ? m.length : 0; }
@@ -571,12 +571,13 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
   }
   function startListening() {
     if (!SR || !wantListen || listening || busy || !track || (synth && synth.speaking)) return;
-    if (Date.now() - lastStart < 1200) return;
-    lastStart = Date.now();
+    if (Date.now() < restartAt) return;
+    heard = false;
     try {
       var r = new SR(), seen = {};
       r.lang = "en-US"; r.continuous = true; r.interimResults = true; r.maxAlternatives = 3;
       r.onresult = function (ev) {
+        heard = true;
         for (var i = ev.resultIndex; i < ev.results.length; i++) {
           var st = seen[i] || (seen[i] = { woke: false, zi: 0, zo: 0 }), res = ev.results[i];
           if (!st.woke) {
@@ -595,7 +596,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
           setStatus("error", "Microphone permission was denied. Allow it in the browser's site settings.");
         } else if (ev.error === "network") { setStatus("error", "Voice listening needs an internet connection."); }
       };
-      r.onend = function () { if (rec === r) { rec = null; listening = false; } };
+      /* Every restart makes Chrome beep. After a silent session wait longer; after speech restart quickly. */
+      r.onend = function () { if (rec === r) { rec = null; listening = false; restartAt = Date.now() + (heard ? 400 : 2500); } };
       rec = r; listening = true; r.start();
     } catch (e) { rec = null; listening = false; }
   }
@@ -610,7 +612,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     $("listen").addEventListener("click", function (e) {
       e.currentTarget.blur();
       wantListen = !wantListen; store.set("sa.listen", wantListen ? "1" : "0"); paintListen();
-      if (wantListen) { unlockSpeech(); keepAwake(); lastStart = 0; startListening(); } else { stopListening(); }
+      if (wantListen) { unlockSpeech(); keepAwake(); restartAt = 0; startListening(); } else { stopListening(); }
       if ($("statusbar").dataset.s === "ready") idle();
     });
   } else {
