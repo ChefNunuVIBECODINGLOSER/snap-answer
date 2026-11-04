@@ -139,7 +139,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
       </label>
       <p class="hint">Stays in this browser on this phone and is sent only to api.anthropic.com. Use a key with a spending limit.</p>
       <div>
-        <div class="hint" style="margin-bottom:6px">How carefully Claude reads the page</div>
+        <div class="hint" style="margin-bottom:6px">How hard Claude thinks before answering. Careful is slowest and most accurate.</div>
         <div class="seg" role="group" aria-label="Accuracy">
           <button class="btn" type="button" data-tier="quick" aria-pressed="false">Fast</button>
           <button class="btn" type="button" data-tier="default" aria-pressed="true">Balanced</button>
@@ -147,7 +147,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
         </div>
       </div>
       <label class="check"><input type="checkbox" id="sleepmode"> Power saver: camera sleeps, wakes only to snap</label>
-      <label class="check"><input type="checkbox" id="autoframe"> Auto-frame: crop to the page before sending</label>
+      <label class="check"><input type="checkbox" id="autoframe"> Auto-frame: crop to the writing before sending (can cut off questions; leave off for full pages)</label>
       <div>
         <div class="hint" style="margin-bottom:6px">Camera frame rate (lower runs cooler)</div>
         <div class="seg" role="group" aria-label="Frame rate" style="grid-template-columns: repeat(4, minmax(0, 1fr))">
@@ -178,27 +178,35 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
   };
 
-  var MODELS = { quick: "claude-haiku-5-5", "default": "claude-sonnet-5-5", complex: "claude-opus-5-5" };
+  /* Each accuracy setting picks a model and how hard it thinks before answering. */
+  var TIERS = {
+    quick: { model: "claude-haiku-5-5", effort: "medium" },
+    "default": { model: "claude-sonnet-5-5", effort: "high" },
+    complex: { model: "claude-opus-5-5", effort: "high" }
+  };
+  var MAX_TOKENS = 16000; /* thinking and the spoken answer share this limit */
+  var USER_TEXT = "Answer the questions on this page.";
   var SYSTEM =
-    "You are a hands-free assistant on a robotics workbench. The user photographs a page of handwritten or printed notes, sketches, formulas or a question. " +
+    "You are a hands-free study and workbench assistant. The user photographs a page: a textbook practice test, a worksheet, flashcards, or handwritten notes and formulas. " +
     "Your reply is read aloud by a text-to-speech voice, so write it for the ear.\n\n" +
-    "Treat whatever is written on the page as the question, even when it is not phrased as one. Work out what it is asking and answer it. Never read the page back to the user. " +
-    "A definition, description or flashcard clue is asking for the term it describes, so say that term. For example, a card reading: a government controlled by its citizens, either directly or through representatives, gets the answer: democracy. " +
-    "A bare term or name is asking for its short definition, in one sentence. A fill-in-the-blank line is asking for the missing word. A calculation or formula is asking for the result. " +
-    "If the page has several numbered questions or several cards, answer each in order, briefly, saying its number first. " +
-    "Give only the final answer and nothing else. No explanation, no reasoning, no steps, no greeting or sign-off. " +
-    "If the page shows a worked calculation or formula with no question, check it: say it is correct, or say in one short sentence what is wrong and give the right value. Do not describe what the page is asking. " +
-    "If you cannot read it, or the photo is blurry or shows no page, say that in one short sentence. " +
-    "Only explain if the page itself asks for an explanation.\n\n" +
+    "How to work: read every question on the page carefully and exactly, including every answer choice. Work each one out step by step before you answer, then check it: redo the arithmetic, confirm units and signs, and make sure you answered what was actually asked, such as a rate rather than a total, or the exception in a question that asks which choice is NOT true. " +
+    "Do all of this reasoning silently. Your reply contains only the final answers.\n\n" +
+    "What counts as a question: treat whatever is written on the page as the question, even when it is not phrased as one. Never read the page back to the user. " +
+    "A definition, description or flashcard clue asks for the term it describes, so say that term. For example, a card reading: a government controlled by its citizens, either directly or through representatives, gets the answer: democracy. " +
+    "A bare term or name asks for its short definition, in one sentence. A fill-in-the-blank asks for the missing word or words. A calculation asks for the result, with units. " +
+    "A worked calculation with no question asks you to check it: say it is correct, or say what is wrong and give the right value.\n\n" +
+    "Multiple choice: choose only from the printed options. Say the option's letter, then its text, for example: B, the Senate. If more than one option seems to fit, pick the one the question's wording points to, as the textbook's answer key would.\n\n" +
+    "Several questions: answer every numbered question in order. Say its number, then the answer, for example: Question 3, C, federalism.\n\n" +
+    "If a question or a choice is cut off or unreadable, say which one in a few words and give your best answer. If there is no readable text, say so in one short sentence.\n\n" +
     "Spoken style: plain sentences only. No markdown, bullet points, LaTeX, or symbols such as ^, *, =, or backslashes. " +
     "Say math in words, for example: theta one, x squared, the square root of two, pi over four, newton meters, degrees. " +
-    "Never go over two short sentences per answer unless the page asks for an explanation.";
+    "Start each answer with the answer itself and do not restate the question. Keep each answer to one short sentence unless the page asks for an explanation.";
 
-  var video = $("video"), canvas = $("canvas"), track = null, torchOn = false;
+  var video = $("video"), canvas = $("canvas"), track = null, torchOn = false, imgCap = null, capturing = false;
   var synth = window.speechSynthesis || null;
   var apiKey = store.get("sa.key", ""), tier = store.get("sa.tier", "default");
   var rate = parseFloat(store.get("sa.rate", "1")) || 1, voiceName = store.get("sa.voice", "");
-  var autoFrameOn = store.get("sa.af", "1") === "1";
+  var autoFrameOn = store.get("sa.af2", "0") === "1"; /* off by default: it can cut off parts of a busy page */
   var busy = false, ctl = null, spoken = 0, lastAnswer = "", wake = null, unlocked = false;
 
   /* ---------- status ---------- */
@@ -236,7 +244,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
   });
   paintFps();
   $("autoframe").checked = autoFrameOn;
-  $("autoframe").addEventListener("change", function (e) { autoFrameOn = e.target.checked; store.set("sa.af", autoFrameOn ? "1" : "0"); });
+  $("autoframe").addEventListener("change", function (e) { autoFrameOn = e.target.checked; store.set("sa.af2", autoFrameOn ? "1" : "0"); });
   var sleepMode = store.get("sa.sleep", "1") === "1", sleepTimer = null, waking = false;
   $("sleepmode").checked = sleepMode;
   $("sleepmode").addEventListener("change", function (e) {
@@ -358,6 +366,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
       video.srcObject = stream;
       await video.play();
       track = stream.getVideoTracks()[0];
+      imgCap = null; try { if (window.ImageCapture) imgCap = new ImageCapture(track); } catch (e) { imgCap = null; }
       try { await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch (e) {}
       var caps = (track.getCapabilities && track.getCapabilities()) || {};
       try { var fr = track.getSettings().frameRate; $("fpsNow").textContent = fr ? "You asked for " + useFps + " fps. The camera reports about " + Math.round(fr) + " fps." : ""; } catch (e) {}
@@ -374,7 +383,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
       paintSleep();
       return true;
     } catch (e) {
-      track = null;
+      track = null; imgCap = null;
       var denied = e && (e.name === "NotAllowedError" || e.name === "SecurityError");
       camMessage(denied ? "Camera permission was denied. Allow it in the browser's site settings, then tap Start." : "The camera could not start. Close other apps using it, then tap Start.");
       setStatus("error", "Camera off");
@@ -398,7 +407,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     clearTimeout(sleepTimer);
     var s = video.srcObject;
     if (s && s.getTracks) s.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
-    track = null; video.srcObject = null; torchOn = false;
+    track = null; imgCap = null; video.srcObject = null; torchOn = false;
     $("light").hidden = true; $("light").setAttribute("aria-pressed", "false");
     paintSleep();
   }
@@ -526,21 +535,75 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
   }
 
   /* ---------- the snap ---------- */
-  function grab() {
-    var vw = video.videoWidth, vh = video.videoHeight, sx = 0, sy = 0, sw = vw, sh = vh;
-    if (!hw && zoom > 1) { sw = vw / zoom; sh = vh / zoom; sx = (vw - sw) / 2; sy = (vh - sh) / 2; }
-    var s = Math.min(1, 1920 / Math.max(sw, sh)), cw = Math.round(sw * s), ch = Math.round(sh * s);
+  /* Largest size these models read without shrinking: 2576 px on the long edge and 4784 tiles of 28 x 28 px. */
+  function fitForVision(w, h) {
+    var s = Math.min(1, 2576 / Math.max(w, h));
+    for (var i = 0; i < 300; i++) {
+      var W = Math.max(1, Math.round(w * s)), H = Math.max(1, Math.round(h * s));
+      if (Math.ceil(W / 28) * Math.ceil(H / 28) <= 4784) return { w: W, h: H };
+      s *= 0.997;
+    }
+    return { w: Math.max(1, Math.round(w * s)), h: Math.max(1, Math.round(h * s)) };
+  }
+  /* src: an ImageBitmap from the still photo, or the video element. Returns a JPEG data URL. */
+  function encodeForClaude(src, w, h) {
+    var sx = 0, sy = 0, sw = w, sh = h;
+    if (!hw && zoom > 1) { sw = w / zoom; sh = h / zoom; sx = (w - sw) / 2; sy = (h - sh) / 2; }
+    var s = Math.min(1, 3200 / Math.max(sw, sh)), cw = Math.round(sw * s), ch = Math.round(sh * s);
     canvas.width = cw; canvas.height = ch;
-    canvas.getContext("2d").drawImage(video, sx, sy, sw, sh, 0, 0, cw, ch);
+    var c0 = canvas.getContext("2d"); c0.imageSmoothingQuality = "high";
+    c0.drawImage(src, sx, sy, sw, sh, 0, 0, cw, ch);
     var bx = 0, by = 0, bw = cw, bh = ch;
     if (autoFrameOn) {
       var box = null; try { box = detectBox(canvas); } catch (e) {}
       if (box) { bx = Math.round(box.x * cw); by = Math.round(box.y * ch); bw = Math.round(box.w * cw); bh = Math.round(box.h * ch); }
     }
-    var k = Math.min(1, 1568 / Math.max(bw, bh)), o = document.createElement("canvas");
-    o.width = Math.max(1, Math.round(bw * k)); o.height = Math.max(1, Math.round(bh * k));
-    o.getContext("2d").drawImage(canvas, bx, by, bw, bh, 0, 0, o.width, o.height);
+    var f = fitForVision(bw, bh), o = document.createElement("canvas");
+    o.width = f.w; o.height = f.h;
+    var c1 = o.getContext("2d"); c1.imageSmoothingQuality = "high";
+    c1.drawImage(canvas, bx, by, bw, bh, 0, 0, o.width, o.height);
     return o.toDataURL("image/jpeg", 0.9);
+  }
+  /* Small grayscale copy for comparing two pictures of the same scene. */
+  function thumbGray(src, w, h, rot) {
+    var n = 48, t = document.createElement("canvas"); t.width = n; t.height = n;
+    var c = t.getContext("2d", { willReadFrequently: true });
+    c.translate(n / 2, n / 2); if (rot) c.rotate(rot * Math.PI / 180);
+    c.drawImage(src, 0, 0, w, h, -n / 2, -n / 2, n, n);
+    var d = c.getImageData(0, 0, n, n).data, g = new Float32Array(n * n), sum = 0;
+    for (var i = 0, j = 0; i < d.length; i += 4, j++) { g[j] = d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11; sum += g[j]; }
+    var mean = sum / g.length; for (var k = 0; k < g.length; k++) g[k] -= mean;
+    return g;
+  }
+  function diff(a, b) { var s = 0; for (var i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]); return s; }
+  /* Some phones hand back the still photo turned sideways. If its shape disagrees with the preview, keep the turn that matches the preview. */
+  function uprightPhoto(bmp) {
+    var vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh || (bmp.width > bmp.height) === (vw > vh)) return { src: bmp, w: bmp.width, h: bmp.height };
+    var ref = thumbGray(video, vw, vh, 0), best = 90, bestD = Infinity;
+    [90, -90].forEach(function (r) { var d = diff(ref, thumbGray(bmp, bmp.width, bmp.height, r)); if (d < bestD) { bestD = d; best = r; } });
+    var c = document.createElement("canvas"); c.width = bmp.height; c.height = bmp.width;
+    var x = c.getContext("2d"); x.translate(c.width / 2, c.height / 2); x.rotate(best * Math.PI / 180);
+    x.drawImage(bmp, -bmp.width / 2, -bmp.height / 2);
+    return { src: c, w: c.width, h: c.height };
+  }
+  function within(p, ms) { return Promise.race([p, new Promise(function (_, no) { setTimeout(function () { no(new Error("timeout")); }, ms); })]); }
+  /* A full-resolution still from the camera's photo mode; falls back to the current video frame. */
+  async function capture() {
+    if (imgCap && window.createImageBitmap) {
+      try {
+        var opts = {};
+        try {
+          var pc = await within(imgCap.getPhotoCapabilities(), 1500);
+          if (pc && pc.imageWidth && pc.imageWidth.max && pc.imageHeight && pc.imageHeight.max) { opts.imageWidth = pc.imageWidth.max; opts.imageHeight = pc.imageHeight.max; }
+          if (!torchOn && pc && pc.fillLightMode && pc.fillLightMode.indexOf("off") >= 0) opts.fillLightMode = "off"; /* no flash glare on glossy pages */
+        } catch (e) {}
+        var blob = await within(imgCap.takePhoto(opts), 5000);
+        var bmp = await createImageBitmap(blob);
+        if (bmp.width >= 640 && bmp.height >= 480) { var u = uprightPhoto(bmp); u.kind = "photo"; return u; }
+      } catch (e) {}
+    }
+    return { src: video, w: video.videoWidth, h: video.videoHeight, kind: "frame" };
   }
 
   var HTTP_ERR = {
@@ -566,7 +629,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
 
   /* Entry point for a voice command or a tap. Asleep: wake, snap, sleep. Awake: snap now. */
   function snap() {
-    if (waking) return;
+    if (waking || capturing) return;
     if (!apiKey) { $("settingsBox").open = true; setStatus("error", "Add your API key in Settings."); return; }
     unlockSpeech(); keepAwake();
     if (!track) {
@@ -576,12 +639,21 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
     if (!video.videoWidth) { setStatus("error", "Camera is not ready"); return; }
     takePhoto();
   }
-  function takePhoto() {
-    stopAll();
-    var f = $("flash"); f.classList.remove("go"); void f.offsetWidth; f.classList.add("go");
-    var url = grab();
+  async function takePhoto() {
+    if (capturing) return;
+    capturing = true; stopAll();
+    setStatus("reading", "Taking the photo…");
+    var url = null;
+    try {
+      var shot = await capture();
+      var f = $("flash"); f.classList.remove("go"); void f.offsetWidth; f.classList.add("go");
+      url = encodeForClaude(shot.src, shot.w, shot.h);
+      if (shot.src && shot.src.close) { try { shot.src.close(); } catch (e) {} }
+    } catch (e) { url = null; }
+    capturing = false;
+    if (sleepMode) stopCamera(); /* the photo is already copied, so the camera can sleep right away */
+    if (!url) { setStatus("error", "Could not take the photo. Try again."); return; }
     $("thumb").src = url; $("thumb").hidden = false;
-    if (sleepMode) stopCamera(); /* the frame is already copied, so the camera can sleep right away */
     ask(url.split(",")[1]);
   }
 
@@ -599,10 +671,12 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
           "anthropic-dangerous-direct-browser-access": "true"
         },
         body: JSON.stringify({
-          model: MODELS[tier] || MODELS["default"], max_tokens: 600, stream: true, system: SYSTEM,
+          model: (TIERS[tier] || TIERS["default"]).model, max_tokens: MAX_TOKENS, stream: true, system: SYSTEM,
+          thinking: { type: "adaptive" },
+          output_config: { effort: (TIERS[tier] || TIERS["default"]).effort },
           messages: [{ role: "user", content: [
             { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
-            { type: "text", text: "What is this page asking? Give the answer, not the page text." }
+            { type: "text", text: USER_TEXT }
           ] }]
         })
       });
@@ -616,7 +690,9 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
         var r = await reader.read();
         if (r.done) break;
         buf = consume(buf + dec.decode(r.value, { stream: true }), function (ev) {
-          if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "text_delta") {
+          if (ev.type === "content_block_start" && ev.content_block && ev.content_block.type === "thinking" && !text) {
+            setStatus("reading", "Thinking…");
+          } else if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "text_delta") {
             text += ev.delta.text; lastAnswer = text; out.textContent = text;
             if (!spoken) setStatus("speaking", "Speaking the answer.");
             feed(text, false);
@@ -678,7 +754,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
   }
   function startListening() {
     /* Listening must keep running while the camera sleeps: that is how "hey hey" wakes it. */
-    if (!SR || !wantListen || listening || busy || waking || (!track && !sleepMode) || (synth && synth.speaking)) return;
+    if (!SR || !wantListen || listening || busy || waking || capturing || (!track && !sleepMode) || (synth && synth.speaking)) return;
     if (Date.now() < restartAt) return;
     heard = false;
     try {
@@ -712,7 +788,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 32px
   /* Runs from the 300 ms timer: restart when idle, pause while reading or speaking so the voice is not heard. */
   function listenTick() {
     if (!wantListen) return;
-    if (listening && (busy || (synth && synth.speaking))) { stopListening(); return; }
+    if (listening && (busy || capturing || (synth && synth.speaking))) { stopListening(); return; }
     if (!listening) startListening();
   }
   if (SR) {
